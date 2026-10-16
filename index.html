@@ -45,16 +45,13 @@ footer{text-align:center;color:#68766c;font-size:12px;padding:10px 20px 28px}
 <div class="buttons"><button class="secondary" id="clearPhoto">Clear photo preview</button></div>
 </section>
 <section class="panel">
-<h2>2. Read text on iPhone (private)</h2>
-<p class="hint">This Home Screen web app cannot directly call Apple's private Vision/Live Text API. To keep recognition on-device, open the photo in Photos, use Live Text to select/copy the register text, then paste it here. This parser runs on this iPhone and makes editable draft rows; verify everything against the image.</p>
-<div class="buttons"><button class="secondary" id="liveTextHelp">How to copy text with Live Text</button></div>
-<label for="ocrText">Paste text copied from the photo</label>
-<textarea id="ocrText" placeholder="Paste the text copied from Photos here..."></textarea>
-<div class="buttons"><button class="primary" id="parseOcr">Parse pasted text into draft lots</button><button class="secondary" id="clearOcr">Clear text</button></div>
-<p class="hint" id="ocrStatus" aria-live="polite">Nothing is uploaded. Parsing is done locally in this page.</p>
+<h2>2. Automatic AI reading</h2>
+<p class="hint">Choose a register photo above. The app will automatically send it to the configured private AI service, extract lot rows, calculate weights and amounts, and show editable results. No API key is entered or stored on this iPhone.</p>
+<div class="buttons"><button class="secondary" id="retryAI">Retry AI reading</button></div>
+<p class="hint" id="aiStatus" aria-live="polite">Choose a photo to start automatic reading.</p>
 </section>
 <section class="panel">
-<h2>3. Lot entries</h2>
+<h2>3. Lot entries (review if needed)</h2>
 <p class="hint">Enter one lot per card. Fractions are comma-separated: <b>63/15</b> means 63 boxes at 15 kg each. A single blank numerator such as <b>1/12.5, /15</b> means the remaining boxes. Multiple blank numerators are flagged, never guessed. For <b>HCR-55/50</b>, enter original mark exactly, identity HCR-55, actual boxes 50.</p>
 <div id="lots"></div>
 <div class="buttons"><button class="primary" id="addLot">＋ Add lot</button><button class="secondary" id="save">Save on this iPhone</button><button class="secondary" id="load">Load saved entries</button><button class="danger" id="clearAll">Clear all</button></div>
@@ -73,7 +70,7 @@ footer{text-align:center;color:#68766c;font-size:12px;padding:10px 20px 28px}
 </section>
 <section class="panel">
 <h2>Privacy & limitations</h2>
-<p class="hint">No account, API key, analytics, external AI, or data-upload code. After the app has been installed from its website once, its files can work offline. Each iPhone stores its own entries separately; saved entries do not automatically sync between phones. OCR is manual via iPhone Live Text, so check every value.</p>
+<p class="hint">AI reading sends the selected photo to your configured private AI service. Use only if you accept that transfer. After the app has been installed from its website once, its files can work offline. Each iPhone stores its own entries separately; saved entries do not automatically sync between phones. OCR is manual via iPhone Live Text, so check every value.</p>
 </section>
 </main>
 <footer>Offline-capable web app · Verify every lot, fraction, box count and rate before using the total.</footer>
@@ -159,53 +156,49 @@ $("load").onclick=()=>{try{const d=localStorage.getItem("raisinChallanLotsV1");i
 $("clearAll").onclick=()=>{if(confirm("Clear all lot entries from this page? Saved entries are not deleted unless you clear them in browser storage.")){lots=[];render()}};
 $("exportCsv").onclick=()=>csvDownload("raisin_challan_summary.csv",results.map(r=>({"Original lot mark":r.mark,"Lot identity":r.identity,"Actual boxes":r.boxes,"Fractions":r.fractions,"Total weight (kg)":Number(r.weight.toFixed(3)),"Rate per kg (INR)":Number((r.rate||0).toFixed(2)),"Amount (INR)":Number(r.amount.toFixed(2)),"Review flags":r.flags})));
 $("exportDetail").onclick=()=>{const rows=[];results.forEach(r=>r.entries.forEach(e=>{if(e.boxes!==null)rows.push({"Original lot mark":r.mark,"Lot identity":r.identity,"Boxes":e.boxes,"Kg per box":e.kg,"Weight (kg)":Number((e.boxes*e.kg).toFixed(3)),"Rate per kg (INR)":Number((r.rate||0).toFixed(2)),"Amount (INR)":Number((e.boxes*e.kg*(r.rate||0)).toFixed(2))})}));csvDownload("raisin_fraction_details.csv",rows)};
-$("photo").addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);$("photoPreview").src=url;$("photoPreview").style.display="block"});
+
+// Set this to the deployed Cloudflare Worker URL during setup. Never put the Gemini key here.
+const AI_ENDPOINT = "PASTE_YOUR_PRIVATE_AI_WORKER_URL_HERE";
+let lastSelectedFile = null;
+async function runAI(file){
+ if(!file)return;
+ lastSelectedFile=file;
+ const status=$("aiStatus");
+ if(AI_ENDPOINT.includes("PASTE_YOUR_PRIVATE")){
+   status.textContent="Automatic reading is ready, but the private AI service has not been connected yet. Finish the one-time server setup described in README.txt.";
+   return;
+ }
+ $("readWithAI")?.setAttribute("disabled","disabled");
+ status.textContent="Reading register in the background… keep this page open.";
+ try{
+   const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)});
+   const base64=String(dataUrl).split(",")[1];
+   const mimeType=file.type||"image/jpeg";
+   const res=await fetch(AI_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mimeType,base64})});
+   if(!res.ok)throw new Error(`AI service error ${res.status}: ${(await res.text()).slice(0,250)}`);
+   const data=await res.json();
+   if(!Array.isArray(data.lots)||!data.lots.length)throw new Error("No lot rows detected. Try a clearer, straight-on photo.");
+   const drafts=data.lots.map(x=>({
+     mark:String(x.original_mark??""), identity:String(x.lot_identity??""),
+     boxes:x.actual_boxes==null?"":String(x.actual_boxes),
+     fractions:Array.isArray(x.fractions)?x.fractions.map(f=>`${f.boxes==null?"":f.boxes}/${f.kg_per_box??""}`).join(", "):"",
+     rate:x.rate_per_kg==null?"":String(x.rate_per_kg),
+     notes:[String(x.notes??""), ...((x.fractions||[]).some(f=>f.boxes==null)?["Blank numerator needs review"]:[])].filter(Boolean).join("; ")
+   }));
+   lots=drafts;render();
+   status.textContent=`Finished reading ${drafts.length} draft lot rows. Check the editable rows and review flags below.`;
+   document.querySelectorAll(".lot")[0]?.scrollIntoView({behavior:"smooth",block:"start"});
+ }catch(err){status.textContent="Could not read photo automatically: "+err.message+". Check connection/service setup, or retry with a clearer photo."}
+}
+$("photo").addEventListener("change",e=>{
+ const f=e.target.files&&e.target.files[0];if(!f)return;
+ const url=URL.createObjectURL(f);$("photoPreview").src=url;$("photoPreview").style.display="block";
+ runAI(f);
+});
+$("retryAI").onclick=()=>runAI(lastSelectedFile);
+
 $("clearPhoto").onclick=()=>{$("photo").value="";$("photoPreview").removeAttribute("src");$("photoPreview").style.display="none"};
 lots=[newLot()];render();
-
-function parsePastedRegister(text){
- const lines=String(text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
- const found=[];
- // Conservative draft parser: expects a lot-like mark, a box count, fraction(s), and optionally a rate on a line.
- // It intentionally does not invent missing fields; ambiguous lines remain unparsed.
- for(const line of lines){
-   const markMatch=line.match(/\b([A-Z]{1,8}[-/]?\d{1,6}(?:[-/]\d{1,6})?)\b/i);
-   const fractionMatches=[...line.matchAll(/(\d*)\s*\/\s*(\d+(?:\.\d+)?)/g)];
-   if(!markMatch || !fractionMatches.length) continue;
-   const mark=markMatch[1];
-   let boxes="";
-   const suffix=mark.match(/\/(\d+)$/);
-   if(suffix) boxes=suffix[1];
-   // Prefer explicit standalone integer close to the mark if no suffix count.
-   if(!boxes){
-     const afterMark=line.slice((markMatch.index||0)+mark.length);
-     const m=afterMark.match(/^\s+(\d{1,5})\b/);
-     if(m) boxes=m[1];
-   }
-   const fractions=fractionMatches.map(m=>`${m[1]}/${m[2]}`).join(", ");
-   // Rate is intentionally not guessed unless a clearly separated number follows the fraction area.
-   const lastFraction=fractionMatches[fractionMatches.length-1];
-   const tail=line.slice((lastFraction.index||0)+lastFraction[0].length);
-   const rateMatch=tail.match(/(?:₹|Rs\.?|rate[:\s]*)\s*(\d+(?:\.\d+)?)/i);
-   const rate=rateMatch?rateMatch[1]:"";
-   found.push({mark,identity:mark.replace(/\/\d+$/,""),boxes,fractions,rate,notes:"Draft from pasted OCR; verify"});
- }
- return found;
-}
-$("parseOcr").onclick=()=>{
- const text=$("ocrText").value;
- if(!text.trim()){ $("ocrStatus").textContent="Paste text first."; return; }
- const parsed=parsePastedRegister(text);
- if(!parsed.length){$("ocrStatus").textContent="No clear lot rows detected. Try copying a full row at a time, or enter rows manually. Nothing was changed.";return;}
- const confirmed=confirm(`Found ${parsed.length} possible lot row(s). Add these as editable drafts? Review every field; OCR can be wrong.`);
- if(!confirmed)return;
- lots=parsed.map(x=>({mark:x.mark,identity:x.identity,boxes:x.boxes,fractions:x.fractions,rate:x.rate,notes:x.notes}));
- render();
- $("ocrStatus").textContent=`Added ${parsed.length} draft row(s). Review and correct all fields before using totals.`;
-};
-$("clearOcr").onclick=()=>{$("ocrText").value="";$("ocrStatus").textContent="Text cleared locally."};
-$("liveTextHelp").onclick=()=>alert("1. Open the same photo in the iPhone Photos app. 2. Tap the Live Text icon if it appears (or press and hold text). 3. Select the register text and tap Copy. 4. Return to this app and paste it into the text box. If Live Text cannot read the handwriting, enter rows manually. The app does not upload the photo or pasted text.");
-
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}
 </script>
 </body>
