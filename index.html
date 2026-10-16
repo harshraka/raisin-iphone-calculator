@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#163c2b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Raisin Calc">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Raisin Challan Calculator</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#17231c;background:#f4f7f4}
+*{box-sizing:border-box}body{margin:0;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{background:#163c2b;color:white;padding:22px 16px 18px}header h1{font-size:23px;margin:0 0 6px}header p{margin:0;font-size:13px;opacity:.9}
+main{max-width:850px;margin:auto;padding:14px}
+.panel{background:white;border:1px solid #dce5dd;border-radius:16px;padding:15px;margin-bottom:13px;box-shadow:0 2px 8px #183d2a0b}
+h2{font-size:17px;margin:0 0 10px}.hint{font-size:13px;color:#526257;line-height:1.45}
+label{font-size:13px;font-weight:650;display:block;margin:9px 0 5px}
+input,textarea,select,button{font:inherit}input,textarea{width:100%;border:1px solid #bdcabe;border-radius:10px;padding:11px;background:#fff;color:#17231c}
+textarea{min-height:68px;resize:vertical}
+button{border:0;border-radius:11px;padding:11px 14px;font-weight:650;cursor:pointer}
+.primary{background:#17643e;color:white}.secondary{background:#e8f1eb;color:#163c2b}.danger{background:#fff0ee;color:#96372c}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.lot{border:1px solid #dce5dd;border-radius:13px;padding:12px;margin-top:10px;background:#fbfdfb}
+.lot-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.lot-head strong{font-size:14px}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.metric{background:#edf5ef;border-radius:12px;padding:12px}.metric span{font-size:12px;color:#526257;display:block}.metric strong{font-size:20px;display:block;margin-top:4px;overflow-wrap:anywhere}
+.flags{color:#8d3d22;font-size:13px;margin-top:8px;line-height:1.4}.good{color:#236b42}
+#photoPreview{max-width:100%;max-height:300px;display:none;border-radius:10px;margin-top:10px}
+footer{text-align:center;color:#68766c;font-size:12px;padding:10px 20px 28px}
+@media(min-width:650px){.metrics{grid-template-columns:repeat(3,1fr)}.lot-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}}
+</style>
+</head>
+<body>
+<header><h1>🧮 Raisin Challan Calculator</h1><p>Private by design · Calculations stay on this iPhone</p></header>
+<main>
+<section class="panel">
+<h2>1. Add challan photo (optional)</h2>
+<p class="hint">The image preview stays in this page and is not uploaded. This app does not perform cloud OCR. On iPhone, open the photo in Photos and use Live Text to copy handwritten/printed text where supported, then enter or correct the values below.</p>
+<label for="photo">Choose or take a photo</label>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<img id="photoPreview" alt="Local challan preview">
+<div class="buttons"><button class="secondary" id="clearPhoto">Clear photo preview</button></div>
+</section>
+<section class="panel">
+<h2>2. Lot entries</h2>
+<p class="hint">Enter one lot per card. Fractions are comma-separated: <b>63/15</b> means 63 boxes at 15 kg each. A single blank numerator such as <b>1/12.5, /15</b> means the remaining boxes. Multiple blank numerators are flagged, never guessed. For <b>HCR-55/50</b>, enter original mark exactly, identity HCR-55, actual boxes 50.</p>
+<div id="lots"></div>
+<div class="buttons"><button class="primary" id="addLot">＋ Add lot</button><button class="secondary" id="save">Save on this iPhone</button><button class="secondary" id="load">Load saved entries</button><button class="danger" id="clearAll">Clear all</button></div>
+<p class="hint" id="saveStatus" aria-live="polite">Entries are not saved automatically. Tap Save to keep them on this device.</p>
+</section>
+<section class="panel">
+<h2>3. Totals</h2>
+<div class="metrics">
+<div class="metric"><span>Lot entries</span><strong id="lotCount">0</strong></div>
+<div class="metric"><span>Total weight</span><strong id="totalWeight">0 kg</strong></div>
+<div class="metric"><span>Grand total</span><strong id="grandTotal">₹0.00</strong></div>
+</div>
+<div id="summary"></div>
+<div class="buttons"><button class="primary" id="exportCsv">Export lot summary CSV</button><button class="secondary" id="exportDetail">Export fraction details CSV</button></div>
+<p class="hint">CSV files are generated on this device. Choose a local destination rather than a cloud-synced folder if you want to keep exports private.</p>
+</section>
+<section class="panel">
+<h2>Privacy & limitations</h2>
+<p class="hint">No account, API key, analytics, external AI, or data-upload code. After the app has been installed from its website once, its files can work offline. Each iPhone stores its own entries separately; saved entries do not automatically sync between phones. OCR is manual via iPhone Live Text, so check every value.</p>
+</section>
+</main>
+<footer>Offline-capable web app · Verify every lot, fraction, box count and rate before using the total.</footer>
+<script>
+const $ = id => document.getElementById(id);
+let lots = [];
+let results = [];
+function newLot(){return {mark:"",identity:"",boxes:"",fractions:"",rate:"",notes:""}}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function render(){
+ const host=$("lots");host.innerHTML="";
+ if(!lots.length) host.innerHTML='<p class="hint">No lots yet. Tap “Add lot”.</p>';
+ lots.forEach((l,i)=>{
+  const el=document.createElement("div");el.className="lot";
+  el.innerHTML=`<div class="lot-head"><strong>Lot ${i+1}</strong><button class="danger" data-remove="${i}">Remove</button></div>
+  <div class="lot-fields">
+  <label>Original lot mark</label><input data-i="${i}" data-k="mark" value="${esc(l.mark)}" placeholder="e.g. ALC-64 or HCR-55/50">
+  <label>Lot identity</label><input data-i="${i}" data-k="identity" value="${esc(l.identity)}" placeholder="e.g. HCR-55">
+  <div class="row"><div><label>Actual boxes</label><input type="number" min="0" step="1" data-i="${i}" data-k="boxes" value="${esc(l.boxes)}" placeholder="64"></div>
+  <div><label>Rate per kg (₹)</label><input type="number" min="0" step="0.01" data-i="${i}" data-k="rate" value="${esc(l.rate)}" placeholder="Rate"></div></div>
+  <label>Fractions (comma separated)</label><input data-i="${i}" data-k="fractions" value="${esc(l.fractions)}" placeholder="e.g. 1/12.5, /15">
+  <label>Notes (optional)</label><input data-i="${i}" data-k="notes" value="${esc(l.notes)}" placeholder="Any notes">
+  </div><div class="lot-result" id="result-${i}"></div>`;
+  host.appendChild(el);
+ });
+ host.querySelectorAll("input[data-i]").forEach(inp=>inp.addEventListener("input",e=>{
+   const i=+e.target.dataset.i,k=e.target.dataset.k;lots[i][k]=e.target.value;
+   if(k==="mark"&&!lots[i].identity){lots[i].identity=e.target.value.replace(/\/\d+$/,"");}
+   calculate();
+ }));
+ host.querySelectorAll("[data-remove]").forEach(btn=>btn.addEventListener("click",()=>{lots.splice(+btn.dataset.remove,1);render();calculate()}));
+ calculate();
+}
+function parseFractions(str){
+ let entries=[],errors=[];
+ if(!String(str||"").trim()) return {entries,errors:["No fractions entered"]};
+ for(const raw of String(str).split(",")){
+  const p=raw.trim().replace(/\s/g,"");if(!p)continue;
+  if(!p.includes("/")){errors.push(`"${raw}" is missing /`);continue}
+  const [ns,ds]=p.split("/",2);const den=Number(ds);
+  if(!ds||!Number.isFinite(den)||den<=0){errors.push(`Invalid kg-per-box denominator in "${raw}"`);continue}
+  let n=null;if(ns!==""){n=Number(ns);if(!Number.isInteger(n)||n<0){errors.push(`Invalid box count in "${raw}"`);continue}}
+  entries.push({boxes:n,kg:den,raw});
+ }
+ return {entries,errors};
+}
+function calculate(){
+ results=[];let grandW=0,grandA=0,summary=[];
+ lots.forEach((l,i)=>{
+  if(!(l.mark||l.identity||l.fractions||l.boxes||l.rate))return;
+  const flags=[];const boxes=Number(l.boxes);const rate=Number(l.rate);
+  let identity=l.identity.trim()||l.mark.trim().replace(/\/\d+$/,"");
+  if(!l.mark.trim())flags.push("Missing original lot mark");
+  if(!Number.isInteger(boxes)||boxes<=0)flags.push("Actual boxes must be > 0");
+  const parsed=parseFractions(l.fractions);flags.push(...parsed.errors);
+  const entries=parsed.entries;const blank=entries.filter(e=>e.boxes===null).length;
+  const known=entries.filter(e=>e.boxes!==null).reduce((a,e)=>a+e.boxes,0);
+  if(blank===1){const rem=boxes-known;if(rem<0)flags.push(`Known box counts (${known}) exceed actual boxes (${boxes})`);else entries.find(e=>e.boxes===null).boxes=rem}
+  else if(blank>1)flags.push("Multiple blank numerators: enter missing box counts manually");
+  else if(entries.length&&known!==boxes)flags.push(`Fraction counts total ${known}; actual boxes are ${boxes}`);
+  if(!Number.isFinite(rate)||rate<=0)flags.push("Enter rate per kg");
+  const weight=entries.reduce((a,e)=>a+(e.boxes===null?0:e.boxes*e.kg),0);
+  const amount=weight*(Number.isFinite(rate)?rate:0);
+  const r={mark:l.mark,identity,boxes,fractions:l.fractions,weight,rate,amount,flags:flags.join("; "),entries};
+  results.push(r);grandW+=weight;grandA+=amount;
+  const target=$(`result-${i}`);
+  if(target)target.innerHTML=`<div class="hint">Weight: <b>${weight.toLocaleString(undefined,{maximumFractionDigits:3})} kg</b> · Amount: <b>${money(amount)}</b></div>`+(flags.length?`<div class="flags">⚠ ${esc(flags.join(" · "))}</div>`:'<div class="flags good">Check against the original register.</div>');
+  summary.push(`<div class="lot"><b>${esc(l.mark||identity||"Lot")}</b><div class="hint">${weight.toLocaleString(undefined,{maximumFractionDigits:3})} kg × ${money(rate)} = <b>${money(amount)}</b></div>${flags.length?`<div class="flags">⚠ ${esc(flags.join(" · "))}</div>`:""}</div>`);
+ });
+ $("lotCount").textContent=results.length;$("totalWeight").textContent=grandW.toLocaleString(undefined,{maximumFractionDigits:3})+" kg";$("grandTotal").textContent=money(grandA);$("summary").innerHTML=summary.join("");
+}
+function money(n){return "₹"+(Number.isFinite(n)?n:0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}
+function csvDownload(filename, rows){
+ if(!rows.length){alert("No lot entries to export yet.");return}
+ const keys=Object.keys(rows[0]);const cell=v=>{let s=String(v??"");if(/[",\n\r]/.test(s))s='"'+s.replace(/"/g,'""')+'"';return s};
+ const csv=[keys.map(cell).join(","),...rows.map(r=>keys.map(k=>cell(r[k])).join(","))].join("\r\n");
+ const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+$("addLot").onclick=()=>{lots.push(newLot());render()};
+$("save").onclick=()=>{try{localStorage.setItem("raisinChallanLotsV1",JSON.stringify(lots));$("saveStatus").textContent="Saved locally on this iPhone/browser."}catch(e){$("saveStatus").textContent="Could not save locally. Export a CSV as backup."}};
+$("load").onclick=()=>{try{const d=localStorage.getItem("raisinChallanLotsV1");if(!d){$("saveStatus").textContent="No saved entries on this device.";return}lots=JSON.parse(d);render();$("saveStatus").textContent="Loaded entries saved on this iPhone/browser."}catch(e){$("saveStatus").textContent="Could not load saved entries."}};
+$("clearAll").onclick=()=>{if(confirm("Clear all lot entries from this page? Saved entries are not deleted unless you clear them in browser storage.")){lots=[];render()}};
+$("exportCsv").onclick=()=>csvDownload("raisin_challan_summary.csv",results.map(r=>({"Original lot mark":r.mark,"Lot identity":r.identity,"Actual boxes":r.boxes,"Fractions":r.fractions,"Total weight (kg)":Number(r.weight.toFixed(3)),"Rate per kg (INR)":Number((r.rate||0).toFixed(2)),"Amount (INR)":Number(r.amount.toFixed(2)),"Review flags":r.flags})));
+$("exportDetail").onclick=()=>{const rows=[];results.forEach(r=>r.entries.forEach(e=>{if(e.boxes!==null)rows.push({"Original lot mark":r.mark,"Lot identity":r.identity,"Boxes":e.boxes,"Kg per box":e.kg,"Weight (kg)":Number((e.boxes*e.kg).toFixed(3)),"Rate per kg (INR)":Number((r.rate||0).toFixed(2)),"Amount (INR)":Number((e.boxes*e.kg*(r.rate||0)).toFixed(2))})}));csvDownload("raisin_fraction_details.csv",rows)};
+$("photo").addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);$("photoPreview").src=url;$("photoPreview").style.display="block"});
+$("clearPhoto").onclick=()=>{$("photo").value="";$("photoPreview").removeAttribute("src");$("photoPreview").style.display="none"};
+lots=[newLot()];render();
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}
+</script>
+</body>
+</html>
