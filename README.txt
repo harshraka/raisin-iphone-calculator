@@ -1,24 +1,23 @@
-RAISIN CHALLAN CALCULATOR — iPHONE HOME SCREEN VERSION
+RAISIN CHALLAN CALCULATOR — AUTOMATIC AI READING
 
-Files:
-- index.html: app interface and calculations
-- manifest.json: Home Screen app metadata
-- sw.js: offline cache
-- icon-192.png and icon-512.png: app icons
+Target workflow: choose/upload one image; the app automatically sends it to the private AI Worker, extracts rows, calculates and displays editable results. No API key is stored in the public GitHub Pages app.
 
-HOW TO PUBLISH FOR YOUR IPHONES
-1. Create a GitHub repository (public is simplest for GitHub Pages; the source code contains no private business data or API keys).
-2. Upload all files in this folder to the repository root.
-3. In repository Settings > Pages, set deployment source to Deploy from a branch, branch main, folder /(root), then Save.
-4. Wait for the Pages URL. Open that HTTPS URL in Safari on each iPhone.
-5. Load the app once while online, then use Safari Share > Add to Home Screen.
-6. Open it from the Home Screen. Test it once, then turn on Airplane Mode to verify offline operation.
+IMPORTANT PRIVACY: The selected register photo is sent through your Cloudflare Worker to Google's Gemini API. This is not fully offline. Do not use if you cannot accept this transfer. The Worker holds the Gemini key as a server-side secret.
 
-PRIVACY
-- No analytics, API keys, AI calls, external scripts, or data upload functions are included.
-- On first visit, the static app files must download from GitHub Pages. After the service worker caches them, the app shell can load offline.
-- Photos are previewed locally in the browser and not uploaded by the app. OCR is manual using iPhone Live Text; the app does not send photos to any OCR service.
-- Each iPhone has its own separate local saved entries. Entries do not sync between devices.
-- Hosting source code publicly makes the app code visible, but not the data entered into the app.
-- For stronger isolation after installation, use Airplane Mode during use. Browser OS-level behavior is outside the app's control.
-- CSV exports may be saved in Files; avoid iCloud Drive or other cloud-synced locations if you want strictly local storage.
+ONE-TIME SETUP
+A. Deploy worker.js as a Cloudflare Worker:
+  1. Sign in/create a Cloudflare account and create a Worker.
+  2. Paste worker.js into the Worker editor and deploy.
+  3. In Worker Settings > Variables and Secrets, add secret GEMINI_API_KEY with your Gemini key. Do not put the key in GitHub.
+  4. Configure CORS to allow only your GitHub Pages origin if possible (the current simple sample uses Access-Control-Allow-Origin: *; restrict this in production).
+  5. Copy the deployed Worker URL.
+B. In index.html, replace PASTE_YOUR_PRIVATE_AI_WORKER_URL_HERE with that Worker URL. Commit the file.
+C. Replace sw.js too so the app cache version updates. Commit both files.
+D. Open the GitHub Pages URL in Safari while online and refresh. Uploading a photo now starts AI reading automatically.
+
+FILES
+- index.html: iPhone web app, auto-uploads selected photo to configured Worker, shows editable draft rows and totals.
+- worker.js: server-side proxy; keep Gemini key as a Worker secret.
+- sw.js, manifest.json, icons: PWA setup.
+
+AI results can be wrong. Verify marks, counts, fractions, and rates before relying on totals. A single blank numerator is resolved by app calculation rules; multiple blanks are flagged for manual review. API use may have quotas/charges under Google's current terms.
