@@ -158,7 +158,7 @@ $("exportCsv").onclick=()=>csvDownload("raisin_challan_summary.csv",results.map(
 $("exportDetail").onclick=()=>{const rows=[];results.forEach(r=>r.entries.forEach(e=>{if(e.boxes!==null)rows.push({"Original lot mark":r.mark,"Lot identity":r.identity,"Boxes":e.boxes,"Kg per box":e.kg,"Weight (kg)":Number((e.boxes*e.kg).toFixed(3)),"Rate per kg (INR)":Number((r.rate||0).toFixed(2)),"Amount (INR)":Number((e.boxes*e.kg*(r.rate||0)).toFixed(2))})}));csvDownload("raisin_fraction_details.csv",rows)};
 
 // Set this to the deployed Cloudflare Worker URL during setup. Never put the Gemini key here.
-const AI_ENDPOINT = "PASTE_YOUR_PRIVATE_AI_WORKER_URL_HERE";
+const AI_ENDPOINT = "https://raisin-ai-reader.harshraka.workers.dev";
 let lastSelectedFile = null;
 async function runAI(file){
  if(!file)return;
