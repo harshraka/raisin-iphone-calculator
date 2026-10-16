@@ -45,14 +45,23 @@ footer{text-align:center;color:#68766c;font-size:12px;padding:10px 20px 28px}
 <div class="buttons"><button class="secondary" id="clearPhoto">Clear photo preview</button></div>
 </section>
 <section class="panel">
-<h2>2. Lot entries</h2>
+<h2>2. Read text on iPhone (private)</h2>
+<p class="hint">This Home Screen web app cannot directly call Apple's private Vision/Live Text API. To keep recognition on-device, open the photo in Photos, use Live Text to select/copy the register text, then paste it here. This parser runs on this iPhone and makes editable draft rows; verify everything against the image.</p>
+<div class="buttons"><button class="secondary" id="liveTextHelp">How to copy text with Live Text</button></div>
+<label for="ocrText">Paste text copied from the photo</label>
+<textarea id="ocrText" placeholder="Paste the text copied from Photos here..."></textarea>
+<div class="buttons"><button class="primary" id="parseOcr">Parse pasted text into draft lots</button><button class="secondary" id="clearOcr">Clear text</button></div>
+<p class="hint" id="ocrStatus" aria-live="polite">Nothing is uploaded. Parsing is done locally in this page.</p>
+</section>
+<section class="panel">
+<h2>3. Lot entries</h2>
 <p class="hint">Enter one lot per card. Fractions are comma-separated: <b>63/15</b> means 63 boxes at 15 kg each. A single blank numerator such as <b>1/12.5, /15</b> means the remaining boxes. Multiple blank numerators are flagged, never guessed. For <b>HCR-55/50</b>, enter original mark exactly, identity HCR-55, actual boxes 50.</p>
 <div id="lots"></div>
 <div class="buttons"><button class="primary" id="addLot">＋ Add lot</button><button class="secondary" id="save">Save on this iPhone</button><button class="secondary" id="load">Load saved entries</button><button class="danger" id="clearAll">Clear all</button></div>
 <p class="hint" id="saveStatus" aria-live="polite">Entries are not saved automatically. Tap Save to keep them on this device.</p>
 </section>
 <section class="panel">
-<h2>3. Totals</h2>
+<h2>4. Totals</h2>
 <div class="metrics">
 <div class="metric"><span>Lot entries</span><strong id="lotCount">0</strong></div>
 <div class="metric"><span>Total weight</span><strong id="totalWeight">0 kg</strong></div>
@@ -153,6 +162,50 @@ $("exportDetail").onclick=()=>{const rows=[];results.forEach(r=>r.entries.forEac
 $("photo").addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const url=URL.createObjectURL(f);$("photoPreview").src=url;$("photoPreview").style.display="block"});
 $("clearPhoto").onclick=()=>{$("photo").value="";$("photoPreview").removeAttribute("src");$("photoPreview").style.display="none"};
 lots=[newLot()];render();
+
+function parsePastedRegister(text){
+ const lines=String(text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+ const found=[];
+ // Conservative draft parser: expects a lot-like mark, a box count, fraction(s), and optionally a rate on a line.
+ // It intentionally does not invent missing fields; ambiguous lines remain unparsed.
+ for(const line of lines){
+   const markMatch=line.match(/\b([A-Z]{1,8}[-/]?\d{1,6}(?:[-/]\d{1,6})?)\b/i);
+   const fractionMatches=[...line.matchAll(/(\d*)\s*\/\s*(\d+(?:\.\d+)?)/g)];
+   if(!markMatch || !fractionMatches.length) continue;
+   const mark=markMatch[1];
+   let boxes="";
+   const suffix=mark.match(/\/(\d+)$/);
+   if(suffix) boxes=suffix[1];
+   // Prefer explicit standalone integer close to the mark if no suffix count.
+   if(!boxes){
+     const afterMark=line.slice((markMatch.index||0)+mark.length);
+     const m=afterMark.match(/^\s+(\d{1,5})\b/);
+     if(m) boxes=m[1];
+   }
+   const fractions=fractionMatches.map(m=>`${m[1]}/${m[2]}`).join(", ");
+   // Rate is intentionally not guessed unless a clearly separated number follows the fraction area.
+   const lastFraction=fractionMatches[fractionMatches.length-1];
+   const tail=line.slice((lastFraction.index||0)+lastFraction[0].length);
+   const rateMatch=tail.match(/(?:₹|Rs\.?|rate[:\s]*)\s*(\d+(?:\.\d+)?)/i);
+   const rate=rateMatch?rateMatch[1]:"";
+   found.push({mark,identity:mark.replace(/\/\d+$/,""),boxes,fractions,rate,notes:"Draft from pasted OCR; verify"});
+ }
+ return found;
+}
+$("parseOcr").onclick=()=>{
+ const text=$("ocrText").value;
+ if(!text.trim()){ $("ocrStatus").textContent="Paste text first."; return; }
+ const parsed=parsePastedRegister(text);
+ if(!parsed.length){$("ocrStatus").textContent="No clear lot rows detected. Try copying a full row at a time, or enter rows manually. Nothing was changed.";return;}
+ const confirmed=confirm(`Found ${parsed.length} possible lot row(s). Add these as editable drafts? Review every field; OCR can be wrong.`);
+ if(!confirmed)return;
+ lots=parsed.map(x=>({mark:x.mark,identity:x.identity,boxes:x.boxes,fractions:x.fractions,rate:x.rate,notes:x.notes}));
+ render();
+ $("ocrStatus").textContent=`Added ${parsed.length} draft row(s). Review and correct all fields before using totals.`;
+};
+$("clearOcr").onclick=()=>{$("ocrText").value="";$("ocrStatus").textContent="Text cleared locally."};
+$("liveTextHelp").onclick=()=>alert("1. Open the same photo in the iPhone Photos app. 2. Tap the Live Text icon if it appears (or press and hold text). 3. Select the register text and tap Copy. 4. Return to this app and paste it into the text box. If Live Text cannot read the handwriting, enter rows manually. The app does not upload the photo or pasted text.");
+
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));}
 </script>
 </body>
